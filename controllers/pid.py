@@ -5,7 +5,8 @@ class Controller(BaseController):
   """
   A simple PID controller
   """
-  def __init__(self,):
+  def __init__(self, controller_name = 'PID'):
+    super().__init__(controller_name)
     self.p = 0.3
     self.i = 0.05
     self.d = -0.1

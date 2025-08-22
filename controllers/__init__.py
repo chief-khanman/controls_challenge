@@ -1,4 +1,8 @@
 class BaseController:
+  def __init__(self, controller_name):
+    self.name = controller_name
+    return None
+  
   def update(self, target_lataccel, current_lataccel, state, future_plan):
     """
     Args:
