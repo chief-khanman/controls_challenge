@@ -38,6 +38,8 @@ LAT_ACCEL_COST_MULTIPLIER = 50.0
 FUTURE_PLAN_STEPS = FPS * 5  # 5 secs
 
 State = namedtuple('State', ['roll_lataccel', 'v_ego', 'a_ego'])
+
+#! what is FuturePlan?
 FuturePlan = namedtuple('FuturePlan', ['lataccel', 'roll_lataccel', 'v_ego', 'a_ego'])
 
 DATASET_URL = "https://huggingface.co/datasets/commaai/commaSteeringControl/resolve/main/data/SYNTHETIC_V0.zip"
@@ -61,6 +63,8 @@ class LataccelTokenizer:
 
 class TinyPhysicsModel:
   def __init__(self, model_path: str, debug: bool) -> None:
+    #                model_path: path to ONNX deep learning model 
+    
     self.tokenizer = LataccelTokenizer()
     options = ort.SessionOptions()
     options.intra_op_num_threads = 1
@@ -85,6 +89,14 @@ class TinyPhysicsModel:
     return sample
 
   def get_current_lataccel(self, sim_states: List[State], actions: List[float], past_preds: List[float]) -> float:
+    '''ONNX model used to return current lateral acceleration
+    Args:
+       sim_states:List[State],
+       actions:List[float],
+       past_preds:List[float]
+    Return:
+       current_lataccel:float
+       '''
     tokenized_actions = self.tokenizer.encode(past_preds)
     raw_states = [list(x) for x in sim_states]
     states = np.column_stack([actions, raw_states])
@@ -96,7 +108,11 @@ class TinyPhysicsModel:
 
 
 class TinyPhysicsSimulator:
-  def __init__(self, model: TinyPhysicsModel, data_path: str, controller: BaseController, debug: bool = False) -> None:
+  def __init__(self, 
+               model: TinyPhysicsModel, 
+               data_path: str, 
+               controller: BaseController, 
+               debug: bool = False) -> None:
     self.data_path = data_path
     self.sim_model = model
     self.data = self.get_data(data_path)
@@ -119,29 +135,47 @@ class TinyPhysicsSimulator:
   def get_data(self, data_path: str) -> pd.DataFrame:
     df = pd.read_csv(data_path)
     processed_df = pd.DataFrame({
-      'roll_lataccel': np.sin(df['roll'].values) * ACC_G,
-      'v_ego': df['vEgo'].values,
-      'a_ego': df['aEgo'].values,
-      'target_lataccel': df['targetLateralAcceleration'].values,
-      'steer_command': -df['steerCommand'].values  # steer commands are logged with left-positive convention but this simulator uses right-positive
+      'roll_lataccel':    np.sin(df['roll'].values) * ACC_G,
+      'v_ego':            df['vEgo'].values,
+      'a_ego':            df['aEgo'].values,
+      'target_lataccel':  df['targetLateralAcceleration'].values,
+      'steer_command':   -df['steerCommand'].values  # steer commands are logged with left-positive convention but this simulator uses right-positive
     })
+
+    #! is steer_command - applied torque ?
+    #! what is target_lat_acceleration, is it the output target, y ?
     return processed_df
 
   def sim_step(self, step_idx: int) -> None:
+    '''Current lateral acceleration is derived from Bicycle Model(BM)
+       the BM is using synthetic data and and ONNX deep learning model to produce the current_lateral_acceleration '''
     pred = self.sim_model.get_current_lataccel(
-      sim_states=self.state_history[-CONTEXT_LENGTH:],
-      actions=self.action_history[-CONTEXT_LENGTH:],
-      past_preds=self.current_lataccel_history[-CONTEXT_LENGTH:]
-    )
+                                                sim_states=self.state_history[-CONTEXT_LENGTH:],
+                                                # self.action_history -> steer_command_history
+                                                actions=self.action_history[-CONTEXT_LENGTH:],
+                                                past_preds=self.current_lataccel_history[-CONTEXT_LENGTH:]
+                                              )
+    
     pred = np.clip(pred, self.current_lataccel - MAX_ACC_DELTA, self.current_lataccel + MAX_ACC_DELTA)
+    
     if step_idx >= CONTROL_START_IDX:
+      # if step_idx is greater than 100 - pred from tiny_physics_model is used 
       self.current_lataccel = pred
     else:
+      # when step_idx less than 100 we are collecting information from data
       self.current_lataccel = self.get_state_target_futureplan(step_idx)[1]
 
     self.current_lataccel_history.append(self.current_lataccel)
 
   def control_step(self, step_idx: int) -> None:
+    '''
+       Output of this method is added to container.
+       Action from controller is sent to plant(vehicle dynamics)
+       which is modeled by an DL model, the ONNX model.
+                                                    '''
+    # action -> target_lat_accel - current_lat_accel, current_lat_accel is what the car has right NOW,
+    #                                             and target_lat_accel is what the car should have
+    #                                                  
     action = self.controller.update(self.target_lataccel_history[step_idx], self.current_lataccel, self.state_history[step_idx], future_plan=self.futureplan)
     if step_idx < CONTROL_START_IDX:
       action = self.data['steer_command'].values[step_idx]
@@ -149,11 +183,24 @@ class TinyPhysicsSimulator:
     self.action_history.append(action)
 
   def get_state_target_futureplan(self, step_idx: int) -> Tuple[State, float, FuturePlan]:
+    '''Get 1. state    -
+           2. target() -
+           3. future   -
+           
+           Args:
+            step_idx
+          Returns:
+            Tuple[State, float<target_acceleration>, FuturePlan]
+                  State, and FuturePlan are namedTuple'''
     state = self.data.iloc[step_idx]
     return (
+      # 1. current STATE
       State(roll_lataccel=state['roll_lataccel'], v_ego=state['v_ego'], a_ego=state['a_ego']),
+      # 2. current target_lataccel
       state['target_lataccel'],
+      # 3. future (STATE + target_lat_accel)
       FuturePlan(
+        #! if step_idx is 99, then how are values that are not present in data accessed 
         lataccel=self.data['target_lataccel'].values[step_idx + 1:step_idx + FUTURE_PLAN_STEPS].tolist(),
         roll_lataccel=self.data['roll_lataccel'].values[step_idx + 1:step_idx + FUTURE_PLAN_STEPS].tolist(),
         v_ego=self.data['v_ego'].values[step_idx + 1:step_idx + FUTURE_PLAN_STEPS].tolist(),
@@ -162,12 +209,17 @@ class TinyPhysicsSimulator:
     )
 
   def step(self) -> None:
-    state, target, futureplan = self.get_state_target_futureplan(self.step_idx)
+    # STATE[v_ego, a_ego, roll_lat_accel], target_lat_accel,     FUTURE[v_ego, a_ego, ,target_lat_accel, roll_lat_accel]
+
+    state,                                       target,                  futureplan = self.get_state_target_futureplan(self.step_idx)
+    
     self.state_history.append(state)
     self.target_lataccel_history.append(target)
     self.futureplan = futureplan
+    
     self.control_step(self.step_idx)
     self.sim_step(self.step_idx)
+    
     self.step_idx += 1
 
   def plot_data(self, ax, lines, axis_labels, title) -> None:
@@ -181,6 +233,7 @@ class TinyPhysicsSimulator:
     ax.set_ylabel(axis_labels[1])
 
   def compute_cost(self) -> Dict[str, float]:
+    '''Cost computed at the end of rollout'''
     target = np.array(self.target_lataccel_history)[CONTROL_START_IDX:COST_END_IDX]
     pred = np.array(self.current_lataccel_history)[CONTROL_START_IDX:COST_END_IDX]
 
