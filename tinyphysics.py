@@ -39,7 +39,16 @@ FUTURE_PLAN_STEPS = FPS * 5  # 5 secs
 
 State = namedtuple('State', ['roll_lataccel', 'v_ego', 'a_ego'])
 
-#! what is FuturePlan?
+# what is FuturePlan? - Ans: information from the planner(mid level planner)
+# that can be used by a controller to generate control actions for next time step 
+# Where does roll_lat_acceleration come from
+#   when a lateral acceleration is applied to a vehicle
+#   the body of the vehicle experiences a roll about its longitudinal axis
+#   this rotational force is called roll_lat_acceleration - since the force induces a roll
+#
+#   There is a delay between lateral acceleration and roll lateral acceleration 
+#   due to suspension of the vehicle  
+#  
 FuturePlan = namedtuple('FuturePlan', ['lataccel', 'roll_lataccel', 'v_ego', 'a_ego'])
 
 DATASET_URL = "https://huggingface.co/datasets/commaai/commaSteeringControl/resolve/main/data/SYNTHETIC_V0.zip"
@@ -89,7 +98,12 @@ class TinyPhysicsModel:
     return sample
 
   def get_current_lataccel(self, sim_states: List[State], actions: List[float], past_preds: List[float]) -> float:
-    '''ONNX model used to return current lateral acceleration
+    '''ONNX model used to return current lateral acceleration based on learned bicycle model.
+    The physics model is a bicycle model, which uses the current state values, current actions(steer commands),
+    and past predictions(past lateral accelerations) to provide with a prediction for vehicles CURRENT lateral acceleration.
+    
+    state, action -> MODEL -> future_state
+    
     Args:
        sim_states:List[State],
        actions:List[float],
