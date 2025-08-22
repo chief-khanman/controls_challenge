@@ -13,6 +13,7 @@ class Controller(BaseController):
     self.error_integral = 0
     self.prev_error = 0
 
+# REMEMBER:                         current_lataccel -> comes from TinyPhysics model
   def update(self, target_lataccel, current_lataccel, state, future_plan):
       '''For PID - 
       Args: 
