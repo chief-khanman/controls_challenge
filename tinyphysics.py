@@ -181,7 +181,9 @@ class TinyPhysicsSimulator:
 
     self.current_lataccel_history.append(self.current_lataccel)
 
-  def control_step(self, step_idx: int) -> None:
+  def control_step(self, 
+                   step_idx: int, 
+                   action_rl:None|np.float32 = None) -> None:
     '''
        Output of this method is added to container.
        Action from controller is sent to plant(vehicle dynamics)
@@ -190,7 +192,11 @@ class TinyPhysicsSimulator:
     # action -> target_lat_accel - current_lat_accel, current_lat_accel is what the car has right NOW,
     #                                             and target_lat_accel is what the car should have
     #                                                  
-    action = self.controller.update(self.target_lataccel_history[step_idx], self.current_lataccel, self.state_history[step_idx], future_plan=self.futureplan)
+    #! action in RL_ENV needs to be passed here so that its added to the STEER_COMMAND(action)
+    if not action_rl:
+      action = self.controller.update(self.target_lataccel_history[step_idx], self.current_lataccel, self.state_history[step_idx], future_plan=self.futureplan)
+    else:
+      action = action_rl
     if step_idx < CONTROL_START_IDX:
       action = self.data['steer_command'].values[step_idx]
     action = np.clip(action, STEER_RANGE[0], STEER_RANGE[1])
@@ -222,7 +228,8 @@ class TinyPhysicsSimulator:
       )
     )
 
-  def step(self) -> None:
+  def step(self, 
+           action:None|np.float32=None) -> None:
     # STATE[v_ego, a_ego, roll_lat_accel], target_lat_accel,     FUTURE[v_ego, a_ego, ,target_lat_accel, roll_lat_accel]
 
     state,                                       target,                  futureplan = self.get_state_target_futureplan(self.step_idx)
@@ -231,7 +238,7 @@ class TinyPhysicsSimulator:
     self.target_lataccel_history.append(target)
     self.futureplan = futureplan
     
-    self.control_step(self.step_idx)
+    self.control_step(self.step_idx, action_rl=action)
     self.sim_step(self.step_idx)
     
     self.step_idx += 1
