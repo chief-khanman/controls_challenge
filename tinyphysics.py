@@ -196,7 +196,9 @@ class TinyPhysicsSimulator:
     if not action_rl:
       action = self.controller.update(self.target_lataccel_history[step_idx], self.current_lataccel, self.state_history[step_idx], future_plan=self.futureplan)
     else:
-      action = action_rl
+      # action from RL_algo will be between -1 and 1 
+      action = action_rl * STEER_RANGE[1]
+
     if step_idx < CONTROL_START_IDX:
       action = self.data['steer_command'].values[step_idx]
     action = np.clip(action, STEER_RANGE[0], STEER_RANGE[1])
@@ -232,13 +234,13 @@ class TinyPhysicsSimulator:
            action:None|np.float32=None) -> None:
     # STATE[v_ego, a_ego, roll_lat_accel], target_lat_accel,     FUTURE[v_ego, a_ego, ,target_lat_accel, roll_lat_accel]
 
-    state,                                       target,                  futureplan = self.get_state_target_futureplan(self.step_idx)
+    state, target, futureplan = self.get_state_target_futureplan(self.step_idx)
     
     self.state_history.append(state)
     self.target_lataccel_history.append(target)
     self.futureplan = futureplan
-    
-    self.control_step(self.step_idx, action_rl=action)
+ 
+    self.control_step(step_idx=self.step_idx, action_rl=action)
     self.sim_step(self.step_idx)
     
     self.step_idx += 1
@@ -337,3 +339,6 @@ if __name__ == "__main__":
     plt.title('costs Distribution')
     plt.legend()
     plt.show()
+
+
+  
