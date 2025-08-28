@@ -202,7 +202,7 @@ class TinyPhysicsSimulator:
     if step_idx < CONTROL_START_IDX:
       action = self.data['steer_command'].values[step_idx]
     action = np.clip(action, STEER_RANGE[0], STEER_RANGE[1])
-    print(f'action from TinyPhySim: {action}')
+    # print(f'action from TinyPhySim: {action}')
     self.action_history.append(action)
 
   def get_state_target_futureplan(self, step_idx: int) -> Tuple[State, float, FuturePlan]:
