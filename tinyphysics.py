@@ -202,6 +202,7 @@ class TinyPhysicsSimulator:
     if step_idx < CONTROL_START_IDX:
       action = self.data['steer_command'].values[step_idx]
     action = np.clip(action, STEER_RANGE[0], STEER_RANGE[1])
+    print(f'action from TinyPhySim: {action}')
     self.action_history.append(action)
 
   def get_state_target_futureplan(self, step_idx: int) -> Tuple[State, float, FuturePlan]:
@@ -272,6 +273,11 @@ class TinyPhysicsSimulator:
 
     for _ in range(CONTEXT_LENGTH, len(self.data)):
       self.step()
+      # lataccel, roll, v, a = self.futureplan
+      # futurep = np.array([lataccel, roll, v, a])
+      # futurep = np.transpose(futurep)
+      # print(futurep)
+      # print(futurep.shape)
       if self.debug and self.step_idx % 10 == 0:
         print(f"Step {self.step_idx:<5}: Current lataccel: {self.current_lataccel:>6.2f}, Target lataccel: {self.target_lataccel_history[-1]:>6.2f}")
         self.plot_data(ax[0], [(self.target_lataccel_history, 'Target lataccel'), (self.current_lataccel_history, 'Current lataccel')], ['Step', 'Lateral Acceleration'], 'Lateral Acceleration')
