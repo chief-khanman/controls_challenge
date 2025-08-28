@@ -5,8 +5,9 @@ import gymnasium as gym
 from stable_baselines3 import PPO
 from tinyphysics import TinyPhysicsModel, TinyPhysicsSimulator
 from tinyphysics import ACC_G, FPS, CONTEXT_LENGTH,CONTROL_START_IDX,COST_END_IDX, VOCAB_SIZE, LAT_ACCEL_COST_MULTIPLIER,LATACCEL_RANGE,STEER_RANGE, MAX_ACC_DELTA,DEL_T, FUTURE_PLAN_STEPS
+from tinyphysics import FuturePlan
 
-
+FUTURE_DIM = 10
 
 class TinyEnv(gym.Env):
     def __init__(self,
@@ -24,10 +25,12 @@ class TinyEnv(gym.Env):
         
         self.controller = controller
 
-        self.observation_space = gym.spaces.Box(low=np.array([-100,-100,-100,-100]), 
-                                                high=np.array([100,100,100,100]), 
-                                                shape=(4,), 
+        # add future plan to the observation space 
+        self.observation_space = gym.spaces.Box(low=-100., 
+                                                high=100., 
+                                                shape=(4+FUTURE_DIM*4,), 
                                                 dtype=np.float64)
+        
         self.action_space = gym.spaces.Box(low=-1, 
                                            high=1, 
                                            shape=(1,), 
@@ -42,9 +45,28 @@ class TinyEnv(gym.Env):
         action:float = action.item()
         self.tiny_sim.step(action)
 
+        # print(self.tiny_sim.futureplan)
+
+
         roll_lataccel, v_ego, a_ego = self.tiny_sim.state_history[-1]
         target_lat_accel = self.tiny_sim.target_lataccel_history[-1]
-        observation = np.array([roll_lataccel, v_ego, a_ego, target_lat_accel])
+        
+        obs_state = np.array([roll_lataccel, v_ego, a_ego, target_lat_accel])
+        obs_state = np.reshape(obs_state, (-1,4))
+        
+        # these variables will not always be of correct shape 
+        lataccel, roll, v, a = self.tiny_sim.futureplan
+        obs_future = np.array([roll, v, a, lataccel])
+        obs_future = np.transpose(obs_future)
+        obs_future = obs_future[:FUTURE_DIM,:]
+
+        if obs_future.shape[0] < FUTURE_DIM:
+            row_pad_dim = FUTURE_DIM - obs_future.shape[0]
+            zero_pad = np.zeros((row_pad_dim, 4))
+            obs_future = np.vstack((obs_future, zero_pad))
+        
+        observation = np.concatenate((obs_state, obs_future))
+        observation = observation.flatten()
         
         pred = self.tiny_sim.current_lataccel_history[-1]
 
@@ -78,10 +100,30 @@ class TinyEnv(gym.Env):
         roll_lataccel, v_ego, a_ego = self.tiny_sim.state_history[-1]
         target_lat_accel = self.tiny_sim.target_lataccel_history[-1]
         
-        observation = np.array([roll_lataccel, v_ego, a_ego, target_lat_accel])
+        # observation = np.array([roll_lataccel, v_ego, a_ego, target_lat_accel])
         
+        # NEW RESET OBS
+        obs_state = np.array([roll_lataccel, v_ego, a_ego, target_lat_accel])
+        obs_state = np.reshape(obs_state, (-1,4))
+        
+        obs_future = np.zeros((FUTURE_DIM,4))
+        
+        observation = np.concatenate((obs_state, obs_future))
+        observation = observation.flatten()
+
+
+
+
+        # NEW RESET OBS
         info = {'target_lat_accel':target_lat_accel}
         
+        # if hasattr(FuturePlan, 'self.tiny_sim.futureplan'):
+        #     print('yes, future plan present after reset')
+        # else:
+        #     print('no, future plan not present')
+
+
+
         return observation, info
 
     def render(self,):
