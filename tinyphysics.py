@@ -135,6 +135,7 @@ class TinyPhysicsSimulator:
     self.reset()
 
   def reset(self) -> None:
+    '''reset uses CONTEXT_LENGTH to set up variables containing history of the first 20 datapoints'''
     self.step_idx = CONTEXT_LENGTH
     state_target_futureplans = [self.get_state_target_futureplan(i) for i in range(self.step_idx)]
     self.state_history = [x[0] for x in state_target_futureplans]
@@ -156,13 +157,16 @@ class TinyPhysicsSimulator:
       'steer_command':   -df['steerCommand'].values  # steer commands are logged with left-positive convention but this simulator uses right-positive
     })
 
-    #! is steer_command - applied torque ?
-    #! what is target_lat_acceleration, is it the output target, y ?
+    #! is steer_command - applied torque ? - steerCommand is input for TinyModel
+    #! what is target_lat_acceleration, is it the output target, y ? - no controller outputs steercommand which is fed into the TinyModel which outputs current_lat_accel
     return processed_df
 
   def sim_step(self, step_idx: int) -> None:
     '''Current lateral acceleration is derived from Bicycle Model(BM)
-       the BM is using synthetic data and and ONNX deep learning model to produce the current_lateral_acceleration '''
+       the BM is using synthetic data and and ONNX deep learning model 
+       to produce the current_lateral_acceleration, 
+       using state_history, action_history, and past_current_lataccel_history'''
+  # pred -> current_lat_accel
     pred = self.sim_model.get_current_lataccel(
                                                 sim_states=self.state_history[-CONTEXT_LENGTH:],
                                                 # self.action_history -> steer_command_history
@@ -183,7 +187,7 @@ class TinyPhysicsSimulator:
 
   def control_step(self, 
                    step_idx: int, 
-                   action_rl:None|np.float32 = None) -> None:
+                   action_from_rl:None|np.float32 = None) -> None:
     '''
        Output of this method is added to container.
        Action from controller is sent to plant(vehicle dynamics)
@@ -193,11 +197,11 @@ class TinyPhysicsSimulator:
     #                                             and target_lat_accel is what the car should have
     #                                                  
     #! action in RL_ENV needs to be passed here so that its added to the STEER_COMMAND(action)
-    if not action_rl:
+    if not action_from_rl:
       action = self.controller.update(self.target_lataccel_history[step_idx], self.current_lataccel, self.state_history[step_idx], future_plan=self.futureplan)
     else:
       # action from RL_algo will be between -1 and 1 
-      action = action_rl * STEER_RANGE[1]
+      action = action_from_rl * STEER_RANGE[1]
 
     if step_idx < CONTROL_START_IDX:
       action = self.data['steer_command'].values[step_idx]
@@ -241,7 +245,7 @@ class TinyPhysicsSimulator:
     self.target_lataccel_history.append(target)
     self.futureplan = futureplan
  
-    self.control_step(step_idx=self.step_idx, action_rl=action)
+    self.control_step(step_idx=self.step_idx, action_from_rl=action)
     self.sim_step(self.step_idx)
     
     self.step_idx += 1
