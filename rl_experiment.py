@@ -19,7 +19,7 @@ env = TinyEnv(model_path="./models/tinyphysics.onnx",data_path="./data/", contro
 #     print(_)
 #     sample_action = env.action_space.sample()
 #     obs, reward, terminated, truncated, info = env.step(sample_action)
-#     print(f"obs: {obs}\nreward: {reward}\nterminated: {terminated}\ntruncated: {truncated}\ninfo: {info}")
+#     # print(f"obs: {obs}\nreward: {reward}\nterminated: {terminated}\ntruncated: {truncated}\ninfo: {info}")
 #     if terminated or truncated:
 #         print('Env has terminated')
 #         print('Resetting')
@@ -33,11 +33,11 @@ env = TinyEnv(model_path="./models/tinyphysics.onnx",data_path="./data/", contro
 # check_env(env)
 
 # Define and Train the agent
-model = PPO("MlpPolicy", env).learn(total_timesteps=1_000_000)
+model = PPO("MlpPolicy", env).learn(total_timesteps=10_000)
 
-
+env.episode_sampler.test = True
 obs,info = env.reset()
-for i in range(100):
+for i in range(1000):
     action, _state = model.predict(obs, deterministic=True)
     # print(f'action: {action}')
     obs, reward, terminated, truncated, info = env.step(action)
@@ -47,4 +47,7 @@ for i in range(100):
         # print()
         # print('Reset Env')
         # print()
+    print(env.tiny_sim.compute_cost())
     print(f'reward: {reward}')
+
+# # PLOTTING 
