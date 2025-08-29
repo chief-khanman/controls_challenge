@@ -9,6 +9,64 @@ from tinyphysics import FuturePlan
 
 FUTURE_DIM = 10
 
+
+
+class EpisodeSampler:
+    def __init__(self, data_dir: str, data_split:float = 0.7, test=False, seed=123):
+        
+        self.test = test
+        self.seed = seed
+        rng = np.random.default_rng(seed=self.seed)
+        self.files = [str(p) for p in sorted(Path(data_dir).iterdir())]
+        rng.shuffle(self.files)
+        assert len(self.files) > 0, "No CSV files found."
+        
+        
+        # split files into two lists
+        splitindex = int(len(self.files)//(data_split*10))
+        # training list
+        self.train_files = self.files[splitindex:]
+        self.train_idx = 0
+        # next should use training_list  
+        
+        # testing list
+        self.test_files = self.files[:splitindex]
+        self.test_idx = 0
+        # lets introduce another bool argument - 'test = True/False'
+        # if test=True, then next will use test_files list 
+        self._shuffle()
+
+
+    def _shuffle(self):
+        if self.test == True:
+            rng = np.random.default_rng(self.seed)
+            rng.shuffle(self.test_files)
+            self.test_idx = 0
+        else:
+            rng = np.random.default_rng(self.seed)
+            rng.shuffle(self.train_files)
+            self.train_idx = 0
+
+    def next(self):
+        # TEST
+        if self.test == True:
+            if self.test_idx >= len(self.test_files):
+                self._shuffle()
+            f = self.test_files[self.test_idx]
+            self.test_idx += 1
+            return f
+        # TRAIN
+        else:
+            if self.train_idx >= len(self.train_files):
+                self._shuffle()
+            f = self.train_files[self.train_idx]
+            self.train_idx += 1
+            return f
+
+
+
+
+
 class TinyEnv(gym.Env):
     def __init__(self,
                  model_path = None, 
@@ -17,6 +75,10 @@ class TinyEnv(gym.Env):
                  debug = False):
         
         super().__init__()
+        
+        #updating/fixing reset 
+        self.episode_sampler = EpisodeSampler(data_dir=data_path)
+        
         
         self.debug = debug
         
@@ -36,8 +98,8 @@ class TinyEnv(gym.Env):
                                            shape=(1,), 
                                            dtype=np.float32)
         
-        self.data_path = Path(data_path) # path to dir
-        self.data_files = sorted(self.data_path.iterdir())
+        # self.data_path = Path(data_path) # path to dir
+        # self.data_files = sorted(self.data_path.iterdir())
         
     
     
@@ -68,11 +130,11 @@ class TinyEnv(gym.Env):
         observation = np.concatenate((obs_state, obs_future))
         observation = observation.flatten()
         
-        pred = self.tiny_sim.current_lataccel_history[-1]
+        pred = self.tiny_sim.current_lataccel
 
-        cost = self._get_reward(target=target_lat_accel, pred=pred)
+        #cost = self._get_reward(target=target_lat_accel, pred=pred)
         
-        reward = -1.0 * cost
+        reward = self._get_reward(target=target_lat_accel, pred=pred, action=action)
         
         truncated = False
         
@@ -86,8 +148,10 @@ class TinyEnv(gym.Env):
     
     
     def reset(self, options:Optional[dict]=None, **kwargs):
+
+        # action history
         #set data_file for step 
-        self.data_file = str(self.data_files.pop(0))
+        self.data_file = self.episode_sampler.next()
         print(self.data_file)
         #create a tiny_sim
         self.tiny_sim = TinyPhysicsSimulator(model=self.tiny_model,
@@ -96,6 +160,8 @@ class TinyEnv(gym.Env):
                                              debug=self.debug)
         
         self.tiny_sim.reset()
+        
+        self.prev_action = self.tiny_sim.action_history[-1] if self.tiny_sim.action_history else 0.0
         
         roll_lataccel, v_ego, a_ego = self.tiny_sim.state_history[-1]
         target_lat_accel = self.tiny_sim.target_lataccel_history[-1]
@@ -133,9 +199,16 @@ class TinyEnv(gym.Env):
         pass
 
 
-    def _get_reward(self,target, pred):
+    def _get_reward(self,target, pred, action):
         '''Compute and return the reward for each step of env'''
-        lat_accel_cost = np.mean((target - pred)**2) * 100
-        jerk_cost = np.mean((pred / DEL_T)**2) * 100
-        total_cost = (lat_accel_cost * LAT_ACCEL_COST_MULTIPLIER) + jerk_cost
-        return total_cost
+        preview_len: int = 50
+        jerk_w =           0.01
+        act_w    =         0.003
+        
+        error = (pred - target)
+        act = self.tiny_sim.action_history[-1]
+        dact = act - self.prev_action
+        #       
+        reward = -error*error - jerk_w*(dact*dact) - act_w*(act*act)
+        self.prev_action = action
+        return reward
