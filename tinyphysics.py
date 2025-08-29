@@ -197,7 +197,7 @@ class TinyPhysicsSimulator:
     #                                             and target_lat_accel is what the car should have
     #                                                  
     #! action in RL_ENV needs to be passed here so that its added to the STEER_COMMAND(action)
-    if not action_from_rl:
+    if action_from_rl is None:
       action = self.controller.update(self.target_lataccel_history[step_idx], self.current_lataccel, self.state_history[step_idx], future_plan=self.futureplan)
     else:
       # action from RL_algo will be between -1 and 1 
